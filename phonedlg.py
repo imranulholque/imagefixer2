@@ -53,7 +53,7 @@ class PhoneDialog(QDialog):
         self.qr.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr.setMinimumHeight(310)
         self.lblUrl = QLabel("")
-        self.lblUrl.setObjectName("muted")
+        self.lblUrl.setObjectName("sub")
         self.lblUrl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lblUrl.setWordWrap(True)
         self.lblUrl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -63,10 +63,8 @@ class PhoneDialog(QDialog):
         self.lblState.setWordWrap(True)
         row = QHBoxLayout()
         self.btnCopy = QPushButton("Copy link")
-        self.btnNew = QPushButton("New code")
-        self.btnNew.setToolTip("Makes a new secret link. The old QR code stops working.")
         self.btnStop = QPushButton("Disconnect")
-        for b in (self.btnCopy, self.btnNew, self.btnStop):
+        for b in (self.btnCopy, self.btnStop):
             row.addWidget(b)
         for w in (t, sub, self.qr, self.lblUrl, self.lblState):
             v.addWidget(w)
@@ -87,7 +85,6 @@ class PhoneDialog(QDialog):
         prow.addStretch(1)
         v.addLayout(prow)
         self.btnCopy.clicked.connect(self._copy)
-        self.btnNew.clicked.connect(lambda: self._start(new_token=True))
         self.btnStop.clicked.connect(self._stop)
         self.timer = QTimer(self)
         self.timer.setInterval(1500)
@@ -143,7 +140,7 @@ class PhoneDialog(QDialog):
         self._url = None
         self.qr.clear()
         self.lblUrl.setText("")
-        self.lblState.setText("Disconnected. Close this window or press New code to connect again.")
+        self.lblState.setText("Disconnected. Close this window and press Add from phone to connect again.")
         self.timer.stop()
 
     def _copy(self):

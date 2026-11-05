@@ -1,7 +1,7 @@
 """The big picture ("card") with its tools.  Works in preview pixels; the window converts to real pixels."""
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
 import core
@@ -51,6 +51,7 @@ class Canvas(QWidget):
         self._sel_img = None
         self._sel_keep = None
         self.crop = None                    # [x0, y0, x1, y1] image pixels
+        self.quad = None                    # perspective crop: 4 points [[x, y] ...] image pixels
         self._pts = []
         self._act = None                    # current mouse action
         self._hover = None
@@ -67,9 +68,12 @@ class Canvas(QWidget):
             if t != "select":
                 self.clear_selection()
             self.crop = None
+            self.quad = None
         self.tool = t
         if t == "crop":
             self.start_crop()
+        elif t == "persp":
+            self.start_persp()
         self._set_cursor()
         self.update()
 
@@ -94,7 +98,7 @@ class Canvas(QWidget):
 
     def _set_cursor(self):
         c = {"hand": Qt.CursorShape.OpenHandCursor, "crop": Qt.CursorShape.CrossCursor,
-             "erase": Qt.CursorShape.CrossCursor, "select": Qt.CursorShape.CrossCursor}.get(self.tool)
+             "erase": Qt.CursorShape.CrossCursor, "persp": Qt.CursorShape.CrossCursor, "select": Qt.CursorShape.CrossCursor}.get(self.tool)
         if self.tool == "pick":
             self.setCursor(dropper_cursor())
         else:
@@ -108,8 +112,11 @@ class Canvas(QWidget):
         if new_picture:
             self.clear_selection()
             self.crop = None
+            self.quad = None
             if self.tool == "crop":
                 self.start_crop()
+            elif self.tool == "persp":
+                self.start_persp()
         if arr is not None and not same:
             self.fit()
         self.update()
@@ -223,6 +230,26 @@ class Canvas(QWidget):
         self.crop = [0.05 * w, 0.05 * h, 0.95 * w, 0.95 * h]
         self.update()
 
+    def start_persp(self):
+        if self.arr is None:
+            return
+        h, w = self.arr.shape[:2]
+        mx, my = 0.08 * w, 0.08 * h
+        self.quad = [[mx, my], [w - mx, my], [w - mx, h - my], [mx, h - my]]
+        self.update()
+
+    def quad_points(self):
+        return None if self.quad is None else [tuple(p) for p in self.quad]
+
+    def _quad_hit(self, pos):
+        best, bi = 22.0, None                       # grab radius in screen pixels
+        for i, (x, y) in enumerate(self.quad):
+            sx, sy = self.to_scr(x, y)
+            d = ((sx - pos.x()) ** 2 + (sy - pos.y()) ** 2) ** 0.5
+            if d < best:
+                best, bi = d, i
+        return bi
+
     def crop_rect(self):
         return None if self.crop is None else tuple(self.crop)
 
@@ -298,6 +325,11 @@ class Canvas(QWidget):
             if hit:
                 self._act = ("crop", hit, x, y, list(self.crop))
             return
+        if self.tool == "persp" and self.quad is not None:
+            i = self._quad_hit(pos)
+            if i is not None:
+                self._act = ("pt", i)
+            return
         mods = e.modifiers()
         sub = bool(mods & Qt.KeyboardModifier.AltModifier) or self.selmode == "sub"
         if self.tool == "select":
@@ -337,6 +369,10 @@ class Canvas(QWidget):
                 self._pts.append((x, y))
         elif a and a[0] == "crop":
             self._drag_crop(pos)
+        elif a and a[0] == "pt":
+            x, y = self.to_img(pos)
+            h, w = self.arr.shape[:2]
+            self.quad[a[1]] = [max(0.0, min(w - 1.0, x)), max(0.0, min(h - 1.0, y))]
         elif self.tool == "crop" and self.crop is not None:
             hit = self._crop_hit(pos)
             self.setCursor({"tl": Qt.CursorShape.SizeFDiagCursor, "br": Qt.CursorShape.SizeFDiagCursor,
@@ -373,6 +409,8 @@ class Canvas(QWidget):
             self._set_cursor()
             return
         if a is None:
+            return
+        if a[0] in ("pt", "crop"):
             return
         if a[0] == "move":
             dx, dy = self._off
@@ -435,6 +473,8 @@ class Canvas(QWidget):
         p.restore()
         if self.crop is not None and self.tool == "crop":
             self._paint_crop(p)
+        elif self.quad is not None and self.tool == "persp":
+            self._paint_persp(p)
         elif self.tool in ("erase", "select") and self.shape == "brush" and self._hover is not None and not self._act:
             r = self.brush / 2.0 * self.z
             p.setPen(QPen(QColor("white"), 1.5))
@@ -485,3 +525,18 @@ class Canvas(QWidget):
         for cx, cy in ((x0, y0), (x1, y0), (x0, y1), (x1, y1), ((x0 + x1) / 2, y0), ((x0 + x1) / 2, y1),
                        (x0, (y0 + y1) / 2), (x1, (y0 + y1) / 2)):
             p.drawEllipse(QPointF(cx, cy), 6, 6)
+
+    def _paint_persp(self, p):
+        pts = [QPointF(*self.to_scr(x, y)) for x, y in self.quad]
+        out = QPainterPath()
+        out.addRect(QRectF(0, 0, self.width(), self.height()))
+        inner = QPainterPath()
+        inner.addPolygon(QPolygonF(pts + [pts[0]]))
+        p.fillPath(out.subtracted(inner), QColor(0, 0, 0, 150))
+        p.setPen(QPen(QColor("white"), 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPolygon(QPolygonF(pts))
+        p.setPen(QPen(QColor("white"), 1))
+        p.setBrush(QColor("#6366f1"))
+        for q in pts:
+            p.drawEllipse(q, 8, 8)

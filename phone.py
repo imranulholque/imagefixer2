@@ -81,12 +81,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(403, "")
             return None
         u = urlparse(self.path)
-        m = re.match(r"^/s/([A-Za-z0-9_\-]+)(/.*)?$", u.path)
-        if not m or not hmac.compare_digest(m.group(1), self.server.token):
-            self._send(404, "This link is not valid any more. Scan the QR code on the computer again.")
-            return None
         self.server.owner.touch()
-        return (m.group(2) or "/"), parse_qs(u.query)
+        return (u.path or "/"), parse_qs(u.query)
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -211,7 +207,7 @@ class PhoneServer(QObject):
 
     def url(self):
         ip = local_ip()
-        return None if ip is None or not self.running() else "http://%s:%d/s/%s/" % (ip, self.port, self.token)
+        return None if ip is None or not self.running() else "http://%s:%d" % (ip, self.port)
 
     def phone_online(self):
         return time.time() - self.last_seen < 12.0

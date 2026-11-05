@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 from PySide6.QtCore import QItemSelectionModel, QMimeData, Qt, QSize, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QDrag, QIcon, QKeySequence, QPixmap, QShortcut
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QColorDialog, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QColorDialog, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QProgressBar, QPushButton, QScrollArea, QSlider, QStackedWidget, QSystemTrayIcon,
                                QVBoxLayout, QWidget)
@@ -27,6 +27,7 @@ HINTS = {
     "erase": "Paint / draw over what you want to remove. It is gone the moment you let go (Ctrl+Z brings it back).",
     "select": "Draw an area, then drag it to move it. Wrong part? Use Subtract, or Ctrl+Z to undo the last step.",
     "crop": "Drag the box or its edges, then press Apply (Enter).",
+    "persp": "Drag the 4 round points onto the 4 corners of the paper, then press Apply (Enter). The paper becomes straight.",
 }
 
 
@@ -269,7 +270,8 @@ class MainWindow(QMainWindow):
                                ("pick", "\U0001f4a7 Pick color", "Click a text colour: change it or make it stronger"),
                                ("erase", "\U0001f9fd Erase", "Remove part of the picture"),
                                ("select", "\u2b1a Select / Move", "Select an area, then drag it elsewhere or copy it"),
-                               ("crop", "\u2702 Crop", "Cut away the edges")):
+                               ("crop", "\u2702 Crop", "Cut away the edges"),
+                               ("persp", "\u25f0 Perspective crop", "Photographed page: set the 4 corners, it is made straight")):
             b = _btn(text, tip, True)
             grp.addButton(b)
             b.clicked.connect(lambda _=False, k=key: self._tool(k))
@@ -278,7 +280,6 @@ class MainWindow(QMainWindow):
         tb.addSpacing(10)
         for text, tip, fn in (("\u27f2", "Rotate left", lambda: self.rotate(90)),
                               ("\u27f3", "Rotate right", lambda: self.rotate(270)),
-                              ("Angle ...", "Rotate by any angle", self.rotate_any),
                               ("Straighten page", "Find the paper in the photo and make it straight", self.straighten),
                               ("Undo", "Ctrl+Z", self.undo), ("Fit", "Ctrl+0", lambda: self.canvas.fit())):
             b = _btn(text, tip)
@@ -378,7 +379,7 @@ class MainWindow(QMainWindow):
         self.optCrop = QWidget()
         c = QHBoxLayout(self.optCrop)
         c.setContentsMargins(0, 0, 0, 0)
-        ok = _btn("Apply crop (Enter)", accent="true")
+        ok = _btn("Apply (Enter)", accent="true")
         ok.clicked.connect(self.crop_apply)
         no = _btn("Cancel (Esc)")
         no.clicked.connect(lambda: self.toolBtns["hand"].click())
@@ -901,7 +902,7 @@ class MainWindow(QMainWindow):
             self._shape(self.shapes[name])
         self.optShape.setVisible(name in ("erase", "select"))
         self.optSelect.setVisible(name == "select")
-        self.optCrop.setVisible(name == "crop")
+        self.optCrop.setVisible(name in ("crop", "persp"))
         self.hint.setText(HINTS[name])
 
     def _shape(self, s):
@@ -915,7 +916,7 @@ class MainWindow(QMainWindow):
         self.canvas.set_copy(on)
 
     def escape(self):
-        if self.tool == "crop":
+        if self.tool in ("crop", "persp"):
             self.toolBtns["hand"].click()
         else:
             self.canvas.clear_selection()
@@ -957,12 +958,6 @@ class MainWindow(QMainWindow):
     def rotate(self, deg):
         self._edit("Rotating", lambda b: core.rotate_image(b, deg))
 
-    def rotate_any(self):
-        v, ok = QInputDialog.getDouble(self, "Rotate", "Degrees (counter-clockwise; use a minus sign for clockwise):",
-                                       0.0, -360.0, 360.0, 1)
-        if ok and v:
-            self._edit("Rotating", lambda b: core.rotate_image(b, v))
-
     def straighten(self):
         def fn(base):
             quad, found = scanner.detect_document(base)
@@ -997,14 +992,22 @@ class MainWindow(QMainWindow):
             dx / s, dy / s, copy))
 
     def crop_apply(self):
-        if self.tool != "crop" or self.cur is None:
+        if self.cur is None or self.tool not in ("crop", "persp"):
+            return
+        s = self.cur.scale
+        after = lambda: self.toolBtns["hand"].click()
+        if self.tool == "persp":
+            q = self.canvas.quad_points()
+            if q is None:
+                return
+            quad = [(x / s, y / s) for x, y in q]
+            self._edit("Straightening", lambda base: scanner.straighten(base, quad), after=after)
             return
         box = self.canvas.crop_rect()
         if box is None:
             return
-        s = self.cur.scale
         b = tuple(v / s for v in box)
-        self._edit("Cropping", lambda base: core.crop_box(base, b), after=lambda: self.toolBtns["hand"].click())
+        self._edit("Cropping", lambda base: core.crop_box(base, b), after=after)
 
     # ================================================================== saving / dragging out
     def _snapshot(self, items):
