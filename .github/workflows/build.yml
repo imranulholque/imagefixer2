@@ -11,6 +11,21 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
+      # makes icon.ico if the repository does not have one (so the build can never fail because of it)
+      - name: Make icon if missing
+        shell: python
+        run: |
+          import os
+          if not os.path.exists("icon.ico"):
+              from PIL import Image, ImageDraw
+              s = 256
+              im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+              d = ImageDraw.Draw(im)
+              d.rounded_rectangle((0, 0, s - 1, s - 1), 56, fill=(99, 102, 241, 255))
+              d.rounded_rectangle((56, 64, 200, 192), 20, outline="white", width=14)
+              d.ellipse((92, 88, 116, 112), fill="white")
+              d.polygon([(72, 176), (116, 132), (144, 160), (164, 140), (184, 176)], fill="white")
+              im.save("icon.ico", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
       # Opens the real window invisibly and clicks through the main features.
       # If something is wrong the log shows exactly where; the exe is still built.
       - name: Self test
